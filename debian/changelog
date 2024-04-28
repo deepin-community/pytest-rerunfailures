@@ -1,5 +1,55 @@
-template-repository (1.0-1) unstable; urgency=medium
+pytest-rerunfailures (12.0-1) unstable; urgency=medium
 
-  * Initial release
+  [ Debian Janitor ]
+  * Update standards version to 4.6.2, no changes needed.
 
- -- Tsic404 <liuheng@deepin.org>  Sat, 28 Jan 2023 13:46:49 +0800
+  [ Paul Wise ]
+  * New upstream release.
+  * dh-sequence-python3, pybuild-plugin-pyproject, autopkgtest-pkg-pybuild
+
+ -- Paul Wise <pabs@debian.org>  Sun, 23 Jul 2023 22:35:01 +0800
+
+pytest-rerunfailures (10.2-2) unstable; urgency=medium
+
+  [ Debian Janitor ]
+  * Remove constraints unnecessary since buster:
+    + Build-Depends: Drop versioned constraint on python3-setuptools.
+
+ -- Jelmer Vernooĳ <jelmer@debian.org>  Sat, 10 Dec 2022 15:08:25 +0000
+
+pytest-rerunfailures (10.2-1) unstable; urgency=medium
+
+  * New upstream release.
+
+ -- Paul Wise <pabs@debian.org>  Sun, 19 Sep 2021 11:38:46 +0800
+
+pytest-rerunfailures (10.1-1) unstable; urgency=medium
+
+  * New upstream release.
+  * Delete egg-info to prevent FTBFS when built twice in a row
+  * Wrap and sort tests control and watch files
+  * Declare compliance with Debian Policy 4.6.0, no changes needed
+
+ -- Paul Wise <pabs@debian.org>  Tue, 24 Aug 2021 17:12:59 +0800
+
+pytest-rerunfailures (9.1.1-1) unstable; urgency=medium
+
+  * New upstream release.
+    - Increases pytest requirement to 5.0
+    - Fixes FTBFS with pytest 6 (Closes: #977081)
+  * Update copyright for new year and version
+  * Bump Standards-Version, no changes needed
+
+ -- Paul Wise <pabs@debian.org>  Mon, 04 Jan 2021 12:23:55 +0800
+
+pytest-rerunfailures (8.0-2) unstable; urgency=medium
+
+  * Add autopkgtest that runs the upstream tests
+
+ -- Paul Wise <pabs@debian.org>  Wed, 28 Oct 2020 16:00:25 +0800
+
+pytest-rerunfailures (8.0-1) unstable; urgency=low
+
+  * Initial release (Closes: #970533)
+
+ -- Paul Wise <pabs@debian.org>  Fri, 18 Sep 2020 14:32:49 +0800
