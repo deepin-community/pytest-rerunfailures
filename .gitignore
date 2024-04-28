@@ -1,0 +1,15 @@
+*.pyc
+pytest_rerunfailures.egg-info/
+.DS_Store
+.Python
+.cache/
+.idea/
+.vscode/
+.python-version
+.tox*
+bin/
+build/*
+dist/
+include/
+lib/
+pip-selfcheck.json
