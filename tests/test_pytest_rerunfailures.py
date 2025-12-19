@@ -3,16 +3,12 @@ import time
 from unittest import mock
 
 import pytest
-from packaging.version import parse as parse_version
 
 from pytest_rerunfailures import HAS_PYTEST_HANDLECRASHITEM
 
-
 pytest_plugins = "pytester"
 
-PYTEST_GTE_60 = parse_version(pytest.__version__) >= parse_version("6.0")
-PYTEST_GTE_61 = parse_version(pytest.__version__) >= parse_version("6.1")
-has_xdist = HAS_PYTEST_HANDLECRASHITEM and PYTEST_GTE_61
+has_xdist = HAS_PYTEST_HANDLECRASHITEM
 
 
 def temporary_failure(count=1):
@@ -58,7 +54,7 @@ def assert_outcomes(
     check_outcome_field(outcomes, "passed", passed)
     check_outcome_field(outcomes, "skipped", skipped)
     check_outcome_field(outcomes, "failed", failed)
-    field = "errors" if PYTEST_GTE_60 else "error"
+    field = "errors"
     check_outcome_field(outcomes, field, error)
     check_outcome_field(outcomes, "xfailed", xfailed)
     check_outcome_field(outcomes, "xpassed", xpassed)
@@ -181,6 +177,85 @@ def test_rerun_passes_after_temporary_test_failure(testdir):
     assert_outcomes(result, passed=1, rerun=1)
 
 
+def test_run_with_fail_on_flaky_fails_with_custom_error_code_after_pass_on_rerun(
+    testdir,
+):
+    testdir.makepyfile(
+        f"""
+        def test_pass():
+            {temporary_failure()}"""
+    )
+    result = testdir.runpytest("--reruns", "1", "--fail-on-flaky")
+    assert_outcomes(result, passed=1, rerun=1)
+    assert result.ret == 7
+
+
+def test_run_fails_with_code_1_after_consistent_test_failure_even_with_fail_on_flaky(
+    testdir,
+):
+    testdir.makepyfile("def test_fail(): assert False")
+    result = testdir.runpytest("--reruns", "1", "--fail-on-flaky")
+    assert_outcomes(result, passed=0, failed=1, rerun=1)
+    assert result.ret == 1
+
+
+def test_run_mark_and_fail_on_flaky_fails_with_custom_error_code_after_pass_on_rerun(
+    testdir,
+):
+    testdir.makepyfile(f"""
+        import pytest
+
+        @pytest.mark.flaky(reruns=1)
+        def test_fail():
+            {temporary_failure()}
+    """)
+    result = testdir.runpytest("--fail-on-flaky")
+    assert_outcomes(result, passed=1, rerun=1)
+    assert result.ret == 7
+
+
+def test_run_fails_with_code_1_after_test_failure_with_fail_on_flaky_and_mark(
+    testdir,
+):
+    testdir.makepyfile("""
+        import pytest
+
+        @pytest.mark.flaky(reruns=2)
+        def test_fail():
+            assert False
+    """)
+    result = testdir.runpytest("--fail-on-flaky")
+    assert_outcomes(result, passed=0, failed=1, rerun=2)
+    assert result.ret == 1
+
+
+def test_run_with_mark_and_fail_on_flaky_succeeds_if_all_tests_pass_without_reruns(
+    testdir,
+):
+    testdir.makepyfile("""
+        import pytest
+
+        @pytest.mark.flaky(reruns=2)
+        def test_marked_pass():
+            assert True
+
+        def test_unmarked_pass():
+            assert True
+    """)
+    result = testdir.runpytest("--fail-on-flaky")
+    assert_outcomes(result, passed=2, rerun=0)
+    assert result.ret == pytest.ExitCode.OK
+
+
+def test_run_with_fail_on_flaky_succeeds_if_all_tests_pass_without_reruns(
+    testdir,
+):
+    testdir.makepyfile("def test_pass(): assert True")
+    result = testdir.runpytest("--reruns", "1", "--fail-on-flaky")
+    assert_outcomes(result, passed=1, rerun=0)
+    assert result.ret == pytest.ExitCode.OK
+
+
 @pytest.mark.skipif(not has_xdist, reason="requires xdist with crashitem")
 def test_rerun_passes_after_temporary_test_crash(testdir):
     # note: we need two tests because there is a bug where xdist
@@ -295,19 +370,6 @@ def test_rerun_on_class_setup_error_with_reruns(testdir):
     )
     result = testdir.runpytest("--reruns", "1")
     assert_outcomes(result, passed=0, error=1, rerun=1)
-
-
-@pytest.mark.skipif(PYTEST_GTE_61, reason="--result-log removed in pytest>=6.1")
-def test_rerun_with_resultslog(testdir):
-    testdir.makepyfile(
-        """
-        def test_fail():
-            assert False"""
-    )
-
-    result = testdir.runpytest("--reruns", "2", "--result-log", "./pytest.log")
-
-    assert_outcomes(result, passed=0, failed=1, rerun=2)
 
 
 @pytest.mark.parametrize("delay_time", [-1, 0, 0.0, 1, 2.5])
@@ -536,12 +598,18 @@ def test_pytest_runtest_logfinish_is_called(testdir):
     ],
 )
 def test_only_rerun_flag(testdir, only_rerun_texts, should_rerun):
-    testdir.makepyfile('def test_only_rerun(): raise AssertionError("ERR")')
+    testdir.makepyfile("""
+        def test_only_rerun1():
+            raise AssertionError("ERR")
 
-    num_failed = 1
+        def test_only_rerun2():
+            assert False, "ERR"
+    """)
+
+    num_failed = 2
     num_passed = 0
-    num_reruns = 1
-    num_reruns_actual = num_reruns if should_rerun else 0
+    num_reruns = 2
+    num_reruns_actual = num_reruns * 2 if should_rerun else 0
 
     pytest_args = ["--reruns", str(num_reruns)]
     for only_rerun_text in only_rerun_texts:
@@ -631,6 +699,26 @@ def test_rerun_except_and_only_rerun(
     assert_outcomes(
         result, passed=num_passed, failed=num_failed, rerun=num_reruns_actual
     )
+
+
+def test_rerun_except_passes_setup_errors(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture()
+        def fixture_setup_fails(non_existent_fixture):
+            return 1
+
+        def test_will_not_run(fixture_setup_fails):
+            assert fixture_setup_fails == 1"""
+    )
+
+    num_reruns = 1
+    pytest_args = ["--reruns", str(num_reruns), "--rerun-except", "ValueError"]
+    result = testdir.runpytest(*pytest_args)
+    assert result.ret != pytest.ExitCode.INTERNAL_ERROR
+    assert_outcomes(result, passed=0, error=1, rerun=num_reruns)
 
 
 @pytest.mark.parametrize(
@@ -733,31 +821,36 @@ def test_only_rerun_flag_in_flaky_marker(
 
 
 @pytest.mark.parametrize(
-    "marker_rerun_except,cli_rerun_except,should_rerun",
+    "marker_rerun_except,cli_rerun_except,raised_error,should_rerun",
     [
-        ("AssertionError", None, False),
-        ("AssertionError: ERR", None, False),
-        (["AssertionError"], None, False),
-        (["AssertionError: ABC"], None, True),
-        ("ValueError", None, True),
-        (["ValueError"], None, True),
-        (["OSError", "ValueError"], None, True),
-        (["OSError", "AssertionError"], None, False),
+        ("AssertionError", None, "AssertionError", False),
+        ("AssertionError: ERR", None, "AssertionError", False),
+        (["AssertionError"], None, "AssertionError", False),
+        (["AssertionError: ABC"], None, "AssertionError", True),
+        ("ValueError", None, "AssertionError", True),
+        (["ValueError"], None, "AssertionError", True),
+        (["OSError", "ValueError"], None, "AssertionError", True),
+        (["OSError", "AssertionError"], None, "AssertionError", False),
         # CLI override behavior
-        ("AssertionError", "ValueError", False),
-        ("ValueError", "AssertionError", True),
+        ("AssertionError", "ValueError", "AssertionError", False),
+        ("ValueError", "AssertionError", "AssertionError", True),
+        ("CustomFailure", None, "CustomFailure", False),
+        ("CustomFailure", None, "AssertionError", True),
     ],
 )
 def test_rerun_except_flag_in_flaky_marker(
-    testdir, marker_rerun_except, cli_rerun_except, should_rerun
+    testdir, marker_rerun_except, cli_rerun_except, raised_error, should_rerun
 ):
     testdir.makepyfile(
         f"""
         import pytest
 
+        class CustomFailure(Exception):
+            pass
+
         @pytest.mark.flaky(reruns=1, rerun_except={marker_rerun_except!r})
         def test_fail():
-            raise AssertionError("ERR")
+            raise {raised_error}("ERR")
         """
     )
     args = []
@@ -1075,3 +1168,208 @@ def test_run_session_teardown_once_after_reruns(testdir):
 
     logging.info.assert_has_calls(expected_calls, any_order=False)
     assert_outcomes(result, failed=8, passed=2, rerun=18, skipped=5, error=1)
+
+
+def test_exception_matches_rerun_except_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="package", autouse=True)
+        def package_fixture():
+            print("package setup")
+            yield "package"
+            print("package teardown")
+
+        @pytest.fixture(scope="module", autouse=True)
+        def module_fixture():
+            print("module setup")
+            yield "module"
+            print("module teardown")
+
+        @pytest.fixture(scope="class", autouse=True)
+        def class_fixture():
+            print("class setup")
+            yield "class"
+            print("class teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, rerun_except=["AssertionError"])
+        class TestStuff:
+            def test_1(self):
+                raise AssertionError("fail")
+
+            def test_2(self):
+                raise ValueError("fail")
+
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=2, rerun=1)
+    result.stdout.fnmatch_lines("session teardown")
+    result.stdout.fnmatch_lines("package teardown")
+    result.stdout.fnmatch_lines("module teardown")
+    result.stdout.fnmatch_lines("class teardown")
+    result.stdout.fnmatch_lines("function teardown")
+
+
+def test_exception_not_match_rerun_except_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, rerun_except="AssertionError")
+        def test_1(session_fixture, function_fixture):
+            raise ValueError("value")
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=1, rerun=1)
+    result.stdout.fnmatch_lines("session teardown")
+
+
+def test_exception_matches_only_rerun_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, only_rerun=["AssertionError"])
+        def test_1(session_fixture, function_fixture):
+            raise AssertionError("fail")
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=1, rerun=1)
+    result.stdout.fnmatch_lines("session teardown")
+
+
+def test_exception_not_match_only_rerun_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, only_rerun=["AssertionError"])
+        def test_1(session_fixture, function_fixture):
+            raise ValueError("fail")
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=1)
+    result.stdout.fnmatch_lines("session teardown")
+
+
+def test_exception_match_rerun_except_in_dual_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, rerun_except=["Exception"], only_rerun=["Not"])
+        def test_1(session_fixture, function_fixture):
+            raise Exception("fail")
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=1)
+    result.stdout.fnmatch_lines("session teardown")
+
+
+def test_exception_match_only_rerun_in_dual_query(testdir):
+    testdir.makepyfile(
+        """
+        import pytest
+
+        @pytest.fixture(scope="session", autouse=True)
+        def session_fixture():
+            print("session setup")
+            yield "session"
+            print("session teardown")
+
+        @pytest.fixture(scope="function", autouse=True)
+        def function_fixture():
+            print("function setup")
+            yield "function"
+            print("function teardown")
+
+        @pytest.mark.flaky(reruns=1, rerun_except=["Not"], only_rerun=["Exception"])
+        def test_1(session_fixture, function_fixture):
+            raise Exception("fail")
+    """
+    )
+    result = testdir.runpytest()
+    assert_outcomes(result, passed=0, failed=1, rerun=1)
+    result.stdout.fnmatch_lines("session teardown")
+
+
+@pytest.mark.parametrize("mark_params", ["", "reruns=1"])
+def test_force_reruns(testdir, mark_params):
+    testdir.makepyfile(
+        f"""
+        import pytest
+
+        @pytest.mark.flaky({mark_params})
+        def test_fail():
+            assert False
+    """
+    )
+
+    result = testdir.runpytest("--force-reruns", "3")
+    assert_outcomes(result, passed=0, failed=1, rerun=3)

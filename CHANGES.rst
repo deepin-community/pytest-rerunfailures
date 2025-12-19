@@ -1,6 +1,130 @@
 Changelog
 =========
 
+16.1 (2025-10-10)
+-----------------
+
+- Drop support for Python 3.9.
+
+- Changed "localhost" to "127.0.0.1" to avoid bad hostname resolution.
+
+- Added ``--force-reruns`` to override rerun count globally.
+  Fixes `#306 <https://github.com/pytest-dev/pytest-rerunfailures/issues/306>`_.
+
+16.0.1 (2025-09-02)
+-------------------
+
+- Reverted the ability to access error attributes because of an incompatibility
+  with `pytest-xdist <https://github.com/pytest-dev/pytest-xdist/issues/843>`_.
+  Fixes `#302 <https://github.com/pytest-dev/pytest-rerunfailures/issues/302>`_,
+  `#303 <https://github.com/pytest-dev/pytest-rerunfailures/issues/303>`_.
+
+16.0 (2025-08-29)
+-----------------
+
+Breaking changes
+++++++++++++++++
+
+- Drop support for pytest < 8.
+
+Features
+++++++++
+
+- Add support for pytest 8.4.x.
+
+- Add support for upcoming Python 3.14.
+
+- Allow ``@pytest.mark.flaky(condition)`` to accept a callable or a string
+  to be evaluated. The evaluated string has access to the exception instance
+  via the ``error`` object.
+  (`#230 <https://github.com/pytest-dev/pytest-rerunfailures/issues/230>`_)
+
+
+15.1 (2025-05-08)
+-----------------
+
+Bug fixes
++++++++++
+
+- Fix ``--fail-on-flaky`` option to fail the test run with custom exit code
+  only when reruns are detected.
+  (`#287 <https://github.com/pytest-dev/pytest-rerunfailures/issues/287>`_)
+
+- Switched to using the SPDX license identifier in the project metadata.
+
+Other changes
++++++++++++++
+
+- Change exception filtering logic to match ``AssertionError`` raised via
+  ``assert`` statements when filtering by "AssertionError".
+  (`#292 <https://github.com/pytest-dev/pytest-rerunfailures/issues/292>`_)
+
+15.0 (2024-11-20)
+-----------------
+
+Breaking changes
+++++++++++++++++
+
+- Drop support for Python 3.8.
+
+- Drop support for pytest < 7.4.
+
+Features
+++++++++
+
+- Fix compatibility with pytest 8.2.
+  (`#267 <https://github.com/pytest-dev/pytest-rerunfailures/issues/267>`_)
+
+- Add support for pytest 8.2, 8.3.
+
+- Add ``--fail-on-flaky`` option to fail the test run with custom exit code
+  when test passed on rerun.
+
+14.0 (2024-03-13)
+-----------------
+
+Bug fixes
++++++++++
+
+- Fix missing teardown for non-function scoped fixtures when using only_rerun or rerun_except queries.
+  (`#234 <https://github.com/pytest-dev/pytest-rerunfailures/issues/234>`_)
+  and (`#241 <https://github.com/pytest-dev/pytest-rerunfailures/issues/241>`_)
+
+Breaking changes
+++++++++++++++++
+
+- Drop support for Python 3.7.
+
+- Drop support for pytest < 7.2.
+
+Features
+++++++++
+
+- Add support for pytest 8.0, 8.1.
+
+
+13.0 (2023-11-22)
+-----------------
+
+Breaking changes
+++++++++++++++++
+
+- Drop support for pytest < 7.0.
+
+Features
+++++++++
+
+- Add support for Python 3.12.
+
+Bug fixes
++++++++++
+
+- Fix crashitem names mismatch between client and server.
+  (`#172 <https://github.com/pytest-dev/pytest-rerunfailures/issues/172>`_)
+
+- Fix crash when setup fails with --rerun-except flag.
+  (`#230 <https://github.com/pytest-dev/pytest-rerunfailures/issues/230>`_)
+
 12.0 (2023-07-05)
 -----------------
 
@@ -60,7 +184,7 @@ Bug fixes
 Features
 ++++++++
 
-- Expose `reruns` and `reruns_delay` through `pytest.ini` file.
+- Expose ``reruns`` and ``reruns_delay`` through ``pytest.ini`` file.
 
 
 11.0 (2023-01-12)
@@ -84,7 +208,7 @@ Bug fixes
 Features
 ++++++++
 
-- Added option `--rerun-except` to rerun failed tests those are other than the mentioned Error.
+- Added option ``--rerun-except`` to rerun failed tests those are other than the mentioned Error.
 
 - Add support for Python 3.11.
 
@@ -289,7 +413,7 @@ Bug fixes
 
 - Add support for Python 3.7.
 
-- Fix issue can occur when used together with `pytest-flake8`
+- Fix issue can occur when used together with ``pytest-flake8``
   (`#73 <https://github.com/pytest-dev/pytest-rerunfailures/issues/73>`_)
 
 
@@ -384,7 +508,7 @@ Bug fixes
 1.0.2 (2016-03-29)
 ------------------
 
-- Add support for `--resultlog` option by parsing reruns accordingly. (#28)
+- Add support for ``--resultlog`` option by parsing reruns accordingly. (#28)
 
 
 1.0.1 (2016-02-02)

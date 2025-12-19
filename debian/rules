@@ -1,7 +1,4 @@
 #!/usr/bin/make -f
 
-export PYBUILD_NAME=pytest-rerunfailures
-export PYBUILD_DISABLE_python2 = 1
-
 %:
 	dh $@ --buildsystem=pybuild

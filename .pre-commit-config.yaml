@@ -1,12 +1,14 @@
 ---
 repos:
-    - repo: https://github.com/psf/black
-      rev: 22.3.0
+    - repo: https://github.com/astral-sh/ruff-pre-commit
+      rev: v0.2.2
       hooks:
-          - id: black
-            args: [--safe, --quiet, --target-version, py36]
+        - id: ruff-format
+          args: ["--preview"]
+        - id: ruff
+          args: ["--exit-non-zero-on-fix"]
     - repo: https://github.com/pre-commit/pre-commit-hooks
-      rev: v4.2.0
+      rev: v4.5.0
       hooks:
           - id: trailing-whitespace
           - id: end-of-file-fixer
@@ -15,27 +17,17 @@ repos:
           - id: check-yaml
           - id: debug-statements
             language_version: python3
-    - repo: https://github.com/PyCQA/flake8
-      rev: 4.0.1
+    - repo: https://github.com/sphinx-contrib/sphinx-lint
+      rev: v0.9.1
       hooks:
-          - id: flake8
-            language_version: python3
-            additional_dependencies: [flake8-typing-imports>=1.9.0]
-    - repo: https://github.com/asottile/reorder_python_imports
-      rev: v3.1.0
+        - id: sphinx-lint
+          args: [--enable=default-role]
+    - repo: https://github.com/tox-dev/pyproject-fmt
+      rev: 1.7.0
       hooks:
-          - id: reorder-python-imports
-            args: ['--application-directories=.:src', --py3-plus]
-    - repo: https://github.com/asottile/pyupgrade
-      rev: v2.32.1
+        - id: pyproject-fmt
+          additional_dependencies: [ tox ]
+    - repo: https://github.com/abravalheri/validate-pyproject
+      rev: v0.24.1
       hooks:
-          - id: pyupgrade
-            args: [--py36-plus]
-    - repo: local
-      hooks:
-          - id: rst
-            name: rst
-            entry: rst-lint --encoding utf-8
-            files: ^(CHANGES.rst|README.rst)$
-            language: python
-            additional_dependencies: [pygments, restructuredtext_lint]
+        - id: validate-pyproject
