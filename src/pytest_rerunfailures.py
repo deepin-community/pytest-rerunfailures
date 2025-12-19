@@ -1,4 +1,5 @@
 import hashlib
+import importlib.metadata
 import os
 import platform
 import re
@@ -15,21 +16,6 @@ from _pytest.outcomes import fail
 from _pytest.runner import runtestprotocol
 from packaging.version import parse as parse_version
 
-if sys.version_info >= (3, 8):
-    import importlib.metadata as importlib_metadata
-else:
-    import importlib_metadata
-
-HAS_RESULTLOG = False
-
-try:
-    from _pytest.resultlog import ResultLog
-
-    HAS_RESULTLOG = True
-except ImportError:
-    # We have a pytest >= 6.1
-    pass
-
 try:
     from xdist.newhooks import pytest_handlecrashitem
 
@@ -37,11 +23,6 @@ try:
     del pytest_handlecrashitem
 except ImportError:
     HAS_PYTEST_HANDLECRASHITEM = False
-
-
-PYTEST_GTE_54 = parse_version(pytest.__version__) >= parse_version("5.4")
-PYTEST_GTE_62 = parse_version(pytest.__version__) >= parse_version("6.2.0")
-PYTEST_GTE_63 = parse_version(pytest.__version__) >= parse_version("6.3.0.dev")
 
 
 def works_with_current_xdist():
@@ -54,8 +35,8 @@ def works_with_current_xdist():
 
     """
     try:
-        d = importlib_metadata.distribution("pytest-xdist")
-    except importlib_metadata.PackageNotFoundError:
+        d = importlib.metadata.distribution("pytest-xdist")
+    except importlib.metadata.PackageNotFoundError:
         return None
     else:
         return parse_version(d.version) >= parse_version("1.20")
@@ -69,6 +50,14 @@ RERUNS_DELAY_DESC = "add time (seconds) delay between reruns."
 def pytest_addoption(parser):
     group = parser.getgroup(
         "rerunfailures", "re-run failing tests to eliminate flaky failures"
+    )
+    group._addoption(
+        "--force-reruns",
+        action="store",
+        dest="force_reruns",
+        type=int,
+        help="Force rerunning all tests the specified number of times,"
+        " irrespective of individual test markers.",
     )
     group._addoption(
         "--only-rerun",
@@ -104,33 +93,16 @@ def pytest_addoption(parser):
         "regex provided. Pass this flag multiple times to accumulate a list "
         "of regexes to match",
     )
-    arg_type = "string" if PYTEST_GTE_62 else None
+    group._addoption(
+        "--fail-on-flaky",
+        action="store_true",
+        dest="fail_on_flaky",
+        help="Fail the test run with exit code 7 if a flaky test passes on a rerun.",
+    )
+
+    arg_type = "string"
     parser.addini("reruns", RERUNS_DESC, type=arg_type)
     parser.addini("reruns_delay", RERUNS_DELAY_DESC, type=arg_type)
-
-
-def _get_resultlog(config):
-    if not HAS_RESULTLOG:
-        return None
-    elif PYTEST_GTE_54:
-        # hack
-        from _pytest.resultlog import resultlog_key
-
-        return config._store.get(resultlog_key, default=None)
-    else:
-        return getattr(config, "_resultlog", None)
-
-
-def _set_resultlog(config, resultlog):
-    if not HAS_RESULTLOG:
-        pass
-    elif PYTEST_GTE_54:
-        # hack
-        from _pytest.resultlog import resultlog_key
-
-        config._store[resultlog_key] = resultlog
-    else:
-        config._resultlog = resultlog
 
 
 # making sure the options make sense
@@ -142,24 +114,16 @@ def check_options(config):
             if config.option.usepdb:  # a core option
                 raise pytest.UsageError("--reruns incompatible with --pdb")
 
-    resultlog = _get_resultlog(config)
-    if resultlog:
-        logfile = resultlog.logfile
-        config.pluginmanager.unregister(resultlog)
-        new_resultlog = RerunResultLog(config, logfile)
-        _set_resultlog(config, new_resultlog)
-        config.pluginmanager.register(new_resultlog)
-
 
 def _get_marker(item):
-    try:
-        return item.get_closest_marker("flaky")
-    except AttributeError:
-        # pytest < 3.6
-        return item.get_marker("flaky")
+    return item.get_closest_marker("flaky")
 
 
 def get_reruns_count(item):
+    reruns = item.session.config.getvalue("force_reruns")
+    if reruns is not None:
+        return reruns
+
     rerun_marker = _get_marker(item)
     # use the marker as a priority over the global setting.
     if rerun_marker is not None:
@@ -239,7 +203,7 @@ def evaluate_condition(item, mark, condition: object) -> bool:
         try:
             filename = f"<{mark.name} condition>"
             condition_code = compile(condition, filename, "eval")
-            result = eval(condition_code, globals_)
+            result = eval(condition_code, globals_)  # noqa: S307
         except SyntaxError as exc:
             msglines = [
                 "Error evaluating %r condition" % mark.name,
@@ -279,10 +243,7 @@ def _remove_cached_results_from_failed_fixtures(item):
             if getattr(fixture_def, cached_result, None) is not None:
                 result, _, err = getattr(fixture_def, cached_result)
                 if err:  # Deleting cached results for only failed fixtures
-                    if PYTEST_GTE_54:
-                        setattr(fixture_def, cached_result, None)
-                    else:
-                        delattr(fixture_def, cached_result)
+                    setattr(fixture_def, cached_result, None)
 
 
 def _remove_failed_setup_state_from_session(item):
@@ -293,13 +254,7 @@ def _remove_failed_setup_state_from_session(item):
           and clean the stack itself
     """
     setup_state = item.session._setupstate
-    if PYTEST_GTE_63:
-        setup_state.stack = {}
-    else:
-        for node in setup_state.stack:
-            if hasattr(node, "_prepare_exc"):
-                del node._prepare_exc
-        setup_state.stack = []
+    setup_state.stack = {}
 
 
 def _get_rerun_filter_regex(item, regex_name):
@@ -315,25 +270,24 @@ def _get_rerun_filter_regex(item, regex_name):
     return regex
 
 
-def _matches_any_rerun_error(rerun_errors, report):
-    for rerun_regex in rerun_errors:
-        try:
-            if re.search(rerun_regex, report.longrepr.reprcrash.message):
-                return True
-        except AttributeError:
-            if re.search(rerun_regex, report.longreprtext):
+def _matches_any_rerun_error(rerun_errors, excinfo):
+    return _try_match_error(rerun_errors, excinfo)
+
+
+def _matches_any_rerun_except_error(rerun_except_errors, excinfo):
+    return _try_match_error(rerun_except_errors, excinfo)
+
+
+def _try_match_error(rerun_errors, excinfo):
+    if excinfo:
+        err = f"{excinfo.type.__name__}: {excinfo.value}"
+        for rerun_regex in rerun_errors:
+            if re.search(rerun_regex, err):
                 return True
     return False
 
 
-def _matches_any_rerun_except_error(rerun_except_errors, report):
-    for rerun_regex in rerun_except_errors:
-        if re.search(rerun_regex, report.longrepr.reprcrash.message):
-            return True
-    return False
-
-
-def _should_hard_fail_on_error(item, report):
+def _should_hard_fail_on_error(item, report, excinfo):
     if report.outcome != "failed":
         return False
 
@@ -346,24 +300,24 @@ def _should_hard_fail_on_error(item, report):
 
     elif rerun_errors and (not rerun_except_errors):
         # Using --only-rerun but not --rerun-except
-        return not _matches_any_rerun_error(rerun_errors, report)
+        return not _matches_any_rerun_error(rerun_errors, excinfo)
 
     elif (not rerun_errors) and rerun_except_errors:
         # Using --rerun-except but not --only-rerun
-        return _matches_any_rerun_except_error(rerun_except_errors, report)
+        return _matches_any_rerun_except_error(rerun_except_errors, excinfo)
 
     else:
         # Using both --only-rerun and --rerun-except
-        matches_rerun_only = _matches_any_rerun_error(rerun_errors, report)
+        matches_rerun_only = _matches_any_rerun_error(rerun_errors, excinfo)
         matches_rerun_except = _matches_any_rerun_except_error(
-            rerun_except_errors, report
+            rerun_except_errors, excinfo
         )
         return (not matches_rerun_only) or matches_rerun_except
 
 
 def _should_not_rerun(item, report, reruns):
     xfail = hasattr(report, "wasxfail")
-    is_terminal_error = _should_hard_fail_on_error(item, report)
+    is_terminal_error = item._terminal_errors[report.when]
     condition = get_reruns_condition(item)
     return (
         item.execution_count > reruns
@@ -399,18 +353,32 @@ def pytest_configure(config):
 
 class XDistHooks:
     def pytest_configure_node(self, node):
-        """xdist hook"""
+        """Configure xdist hook for node sock_port."""
         node.workerinput["sock_port"] = node.config.failures_db.sock_port
 
     def pytest_handlecrashitem(self, crashitem, report, sched):
-        """
-        Return the crashitem from pending and collection.
-        """
+        """Return the crashitem from pending and collection."""
         db = sched.config.failures_db
         reruns = db.get_test_reruns(crashitem)
         if db.get_test_failures(crashitem) < reruns:
-            sched.mark_test_pending(crashitem)
-            report.outcome = "rerun"
+            try:
+                sched.mark_test_pending(crashitem)
+                report.outcome = "rerun"
+            except NotImplementedError:
+                # Some schedulers (like LoadScopeScheduling) don't implement
+                # mark_test_pending
+                # In this case, we can't reschedule the crashed test for rerun
+                # Mark it as failed with a clear message about why it couldn't be rerun
+                report.outcome = "failed"
+                if not hasattr(report, "longrepr") or report.longrepr is None:
+                    error_msg = (
+                        "Test crashed and could not be rescheduled for rerun."
+                        f" The scheduler '{sched.__class__.__name__}' does not support"
+                        " rescheduling crashed tests"
+                        " (mark_test_pending not implemented)."
+                        f" Remaining reruns: {reruns - db.get_test_failures(crashitem)}"
+                    )
+                    report.longrepr = error_msg
 
         db.add_test_failure(crashitem)
 
@@ -426,9 +394,7 @@ class StatusDB:
 
     def _hash(self, crashitem: str) -> str:
         if crashitem not in self.hmap:
-            self.hmap[crashitem] = hashlib.sha1(
-                crashitem.encode(),
-            ).hexdigest()[:10]
+            self.hmap[crashitem] = hashlib.sha1(crashitem.encode()).hexdigest()[:10]  # noqa: S324
 
         return self.hmap[crashitem]
 
@@ -483,7 +449,7 @@ class SocketDB(StatusDB):
 class ServerStatusDB(SocketDB):
     def __init__(self):
         super().__init__()
-        self.sock.bind(("localhost", 0))
+        self.sock.bind(("127.0.0.1", 0))
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 
         self.rerunfailures_db = {}
@@ -525,7 +491,7 @@ class ServerStatusDB(SocketDB):
 class ClientStatusDB(SocketDB):
     def __init__(self, sock_port):
         super().__init__()
-        self.sock.connect(("localhost", sock_port))
+        self.sock.connect(("127.0.0.1", sock_port))
 
     def _set(self, i: str, k: str, v: int):
         self._sock_send(self.sock, "|".join(("set", i, k, str(v))))
@@ -533,6 +499,9 @@ class ClientStatusDB(SocketDB):
     def _get(self, i: str, k: str) -> int:
         self._sock_send(self.sock, "|".join(("get", i, k, "")))
         return int(self._sock_recv(self.sock))
+
+
+suspended_finalizers = {}
 
 
 def pytest_runtest_teardown(item, nextitem):
@@ -548,19 +517,29 @@ def pytest_runtest_teardown(item, nextitem):
         return
 
     _test_failed_statuses = getattr(item, "_test_failed_statuses", {})
-    if item.execution_count <= reruns and any(_test_failed_statuses.values()):
-        # clean cashed results from any level of setups
+
+    # Only remove non-function level actions from the stack if the test is to be re-run
+    # Exceeding re-run limits, being free of failue statuses, and encountering
+    # allowable exceptions indicate that the test is not to be re-ran.
+    if (
+        item.execution_count <= reruns
+        and any(_test_failed_statuses.values())
+        and not any(item._terminal_errors.values())
+    ):
+        # clean cached results from any level of setups
         _remove_cached_results_from_failed_fixtures(item)
 
         if item in item.session._setupstate.stack:
-            if PYTEST_GTE_63:
-                for key in list(item.session._setupstate.stack.keys()):
-                    if key != item:
-                        del item.session._setupstate.stack[key]
-            else:
-                for node in list(item.session._setupstate.stack):
-                    if node != item:
-                        item.session._setupstate.stack.remove(node)
+            for key in list(item.session._setupstate.stack.keys()):
+                if key != item:
+                    # only the first finalizer contains the correct teardowns
+                    if key not in suspended_finalizers:
+                        suspended_finalizers[key] = item.session._setupstate.stack[key]
+                    del item.session._setupstate.stack[key]
+    else:
+        # restore suspended finalizers
+        item.session._setupstate.stack.update(suspended_finalizers)
+        suspended_finalizers.clear()
 
 
 @pytest.hookimpl(hookwrapper=True)
@@ -570,9 +549,16 @@ def pytest_runtest_makereport(item, call):
     if result.when == "setup":
         # clean failed statuses at the beginning of each test/rerun
         setattr(item, "_test_failed_statuses", {})
+
+        # create a dict to store error-check results for each stage
+        setattr(item, "_terminal_errors", {})
+
     _test_failed_statuses = getattr(item, "_test_failed_statuses", {})
     _test_failed_statuses[result.when] = result.failed
     item._test_failed_statuses = _test_failed_statuses
+    item._terminal_errors[result.when] = _should_hard_fail_on_error(
+        item, result, call.excinfo
+    )
 
 
 def pytest_runtest_protocol(item, nextitem):
@@ -593,10 +579,9 @@ def pytest_runtest_protocol(item, nextitem):
     check_options(item.session.config)
     delay = get_reruns_delay(item)
     parallel = not is_master(item.config)
-    item_location = (item.location[0] + "::" + item.location[2]).replace("\\", "/")
     db = item.session.config.failures_db
-    item.execution_count = db.get_test_failures(item_location)
-    db.set_test_reruns(item_location, reruns)
+    item.execution_count = db.get_test_failures(item.nodeid)
+    db.set_test_reruns(item.nodeid, reruns)
 
     if item.execution_count > reruns:
         return True
@@ -665,31 +650,16 @@ def show_rerun(terminalreporter, lines):
             lines.append(f"RERUN {pos}")
 
 
-if HAS_RESULTLOG:
+@pytest.hookimpl(trylast=True)
+def pytest_sessionfinish(session, exitstatus):
+    if exitstatus != 0:
+        return
 
-    class RerunResultLog(ResultLog):
-        def __init__(self, config, logfile):
-            ResultLog.__init__(self, config, logfile)
-
-        def pytest_runtest_logreport(self, report):
-            """Add support for rerun report."""
-            if report.when != "call" and report.passed:
-                return
-            res = self.config.hook.pytest_report_teststatus(report=report)
-            code = res[1]
-            if code == "x":
-                longrepr = str(report.longrepr)
-            elif code == "X":
-                longrepr = ""
-            elif report.passed:
-                longrepr = ""
-            elif report.failed:
-                longrepr = str(report.longrepr)
-            elif report.skipped:
-                longrepr = str(report.longrepr[2])
-            elif report.outcome == "rerun":
-                longrepr = str(report.longrepr)
-            else:
-                longrepr = str(report.longrepr)
-
-            self.log_outcome(report, code, longrepr)
+    if session.config.option.fail_on_flaky:
+        for item in session.items:
+            if not hasattr(item, "execution_count"):
+                # no rerun requested
+                continue
+            if item.execution_count > 1:
+                session.exitstatus = 7
+                break

@@ -1,8 +1,12 @@
 pytest-rerunfailures
 ====================
 
+.. START-SHORT-DESCRIPTION
+
 pytest-rerunfailures is a plugin for `pytest <https://pytest.org>`_ that
 re-runs tests to eliminate intermittent failures.
+
+.. END-SHORT-DESCRIPTION
 
 .. image:: https://img.shields.io/badge/license-MPL%202.0-blue.svg
    :target: https://github.com/pytest-dev/pytest-rerunfailures/blob/master/LICENSE
@@ -13,14 +17,19 @@ re-runs tests to eliminate intermittent failures.
 .. image:: https://github.com/pytest-dev/pytest-rerunfailures/workflows/Test/badge.svg
    :target: https://github.com/pytest-dev/pytest-rerunfailures/actions
    :alt: GitHub Actions
+.. image:: https://readthedocs.org/projects/pytest-rerunfailures/badge/?version=latest
+    :target: https://pytest-rerunfailures.readthedocs.io/latest/?badge=latest
+    :alt: Documentation Status
+
+.. START-INSTALLATION
 
 Requirements
 ------------
 
 You will need the following prerequisites in order to use pytest-rerunfailures:
 
-- Python 3.7, up to 3.11, or PyPy3
-- pytest 6.0 or newer
+- Python 3.10+ or PyPy3
+- pytest 8.0 or newer
 
 This plugin can recover from a hard crash with the following optional
 prerequisites:
@@ -40,12 +49,14 @@ To install pytest-rerunfailures:
 
   $ pip install pytest-rerunfailures
 
+.. END-INSTALLATION
+
 Recover from hard crashes
 -------------------------
 
 If one or more tests trigger a hard crash (for example: segfault), this plugin
 will ordinarily be unable to rerun the test. However, if a compatible version of
-pytest-xdist is installed, and the tests are run within pytest-xdist using the `-n`
+pytest-xdist is installed, and the tests are run within pytest-xdist using the ``-n``
 flag, this plugin will be able to rerun crashed tests, assuming the workers and
 controller are on the same LAN (this assumption is valid for almost all cases
 because most of the time the workers and controller are on the same computer).
@@ -106,13 +117,6 @@ would only rerun those errors that does not match with ``AssertionError`` or ``O
 .. code-block:: bash
 
    $ pytest --reruns 5 --rerun-except AssertionError --rerun-except OSError
-
-.. note::
-
-   When the ```AssertionError``` comes from the use of the ``assert`` keyword,
-   use ``--rerun-except assert`` instead::
-
-   $ pytest --reruns 5 --rerun-except assert
 
 Re-run individual failures
 --------------------------
@@ -186,6 +190,16 @@ You can use ``@pytest.mark.flaky(condition)`` similarly as ``@pytest.mark.skipif
 
 Note that the test will re-run for any ``condition`` that is truthy.
 
+Force rerun count
+-----------------
+
+To force a specific re-run count globally, irrespective of the number
+of re-runs specified in test markers, pass ``--force-reruns``:
+
+.. code-block:: bash
+
+   $ pytest --force-reruns 5
+
 Output
 ------
 
@@ -212,15 +226,38 @@ Here's an example of the output provided by the plugin when run with
 Note that output will show all re-runs. Tests that fail on all the re-runs will
 be marked as failed.
 
+.. START-COMPATIBILITY
+
 Compatibility
 -------------
 
-* This plugin may *not* be used with class, module, and package level fixtures.
 * This plugin is *not* compatible with pytest-xdist's --looponfail flag.
 * This plugin is *not* compatible with the core --pdb flag.
 * This plugin is *not* compatible with the plugin
   `flaky <https://pypi.org/project/flaky/>`_, you can only have
   ``pytest-rerunfailures`` or ``flaky`` but not both.
+
+.. END-COMPATIBILITY
+
+.. START-PRIORITY
+
+Priority
+-------------
+
+You can specify arguments in three places. So if you set the number of reruns in all three,
+which one takes priority?
+
+* Top priority is the marker, such as ``@pytest.mark.flaky(reruns=1)``
+* Second priority is what's specified on the command line, like ``--reruns=2``
+* Last priority is the ``pyproject.toml`` (or ``pytest.ini``) file setting, like ``reruns = 3``
+
+Additionally, all three can be overridden by passing ``--force-reruns`` argument
+on the command line.
+
+.. END-PRIORITY
+
+
+.. START-CONTRIBUTING
 
 Resources
 ---------
@@ -239,3 +276,5 @@ Development
     @hookimpl(tryfirst=True)
     def pytest_runtest_makereport(item, call):
         print(item.execution_count)
+
+.. END-CONTRIBUTING
